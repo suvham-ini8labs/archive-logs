@@ -1,0 +1,90 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: vlogs-daily-backup
+  namespace: logging 
+spec:
+  schedule: "0 1 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          volumes:
+            - name: vlogs-data
+              persistentVolumeClaim:
+                claimName: server-volume-vls-victoria-logs-single-server-0
+            - name: vlogs-backup
+              persistentVolumeClaim:
+                claimName: victorialogs-backup-pvc
+            - name: rclone-config
+              secret:
+                secretName: rclone-s3-config
+
+          initContainers:
+            - name: tar-backup
+              image: busybox:1.37
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  PARTITION=$(date -d "@$(($(date +%s) - 86400))" +%Y%m%d)
+                  ARCHIVE_NAME=$(date -d "@$(($(date +%s) - 86400))" +%Y-%m-%d)
+                  VLOGS_URL="http://vls-victoria-logs-single-server:9428"
+                  BACKUP_DIR="/backup"
+
+                  echo "==> [$(date +%Y-%m-%d\ %H:%M:%S)] Starting snapshot backup for partition: $PARTITION"
+
+                  echo "==> [$(date +%Y-%m-%d\ %H:%M:%S)] Creating snapshot for partition: $PARTITION"
+                  SNAPSHOT_RESPONSE=$(wget -qO- "${VLOGS_URL}/internal/partition/snapshot/create?partition_prefix=${PARTITION}")
+                  echo "==> [$(date +%Y-%m-%d\ %H:%M:%S)] Snapshot response: $SNAPSHOT_RESPONSE"
+
+                  SNAPSHOT_PATH=$(echo "$SNAPSHOT_RESPONSE" | sed 's/\["\(.*\)"\]/\1/')
+                  SNAPSHOT_NAME=$(basename "$SNAPSHOT_PATH")
+                  echo "==> [$(date +%Y-%m-%d\ %H:%M:%S)] Snapshot path: $SNAPSHOT_PATH"
+                  echo "==> [$(date +%Y-%m-%d\ %H:%M:%S)] Snapshot name: $SNAPSHOT_NAME"
+
+                  ARCHIVE="${BACKUP_DIR}/vlogs_${ARCHIVE_NAME}.tar.gz"
+                  
+                  echo "==> [$(date +%Y-%m-%d\ %H:%M:%S)] Tarring snapshot -> $ARCHIVE"
+                  tar -czf "$ARCHIVE" -C "/data/partitions/${PARTITION}/snapshots/" "$SNAPSHOT_NAME"
+                  echo "==> [$(date +%Y-%m-%d\ %H:%M:%S)] Archive size: $(du -sh $ARCHIVE | cut -f1)"
+
+                  echo "==> [$(date +%Y-%m-%d\ %H:%M:%S)] Deleting snapshot: $SNAPSHOT_PATH"
+                  wget -qO- "${VLOGS_URL}/internal/partition/snapshot/delete?path=${SNAPSHOT_PATH}"
+
+                  echo "==> [$(date +%Y-%m-%d\ %H:%M:%S)] Backup complete: $ARCHIVE"
+              volumeMounts:
+                - name: vlogs-data
+                  mountPath: /data
+                  readOnly: true
+                - name: vlogs-backup
+                  mountPath: /backup
+
+          containers:
+            - name: rclone-upload
+              image: rclone/rclone:sha-dced0a1
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  YESTERDAY=$(date -d "@$(($(date +%s) - 86400))" +%Y%m%d)
+                  ARCHIVE="/backup/vlogs_${YESTERDAY}.tar.gz"
+
+                  echo "==> Uploading $ARCHIVE to S3"
+                  rclone --config /etc/rclone/rclone.conf \
+                    copy "$ARCHIVE" \
+                    s3:your-bucket-name/vlogs/
+
+                  echo "==> Upload done, cleaning up local archive"
+                  rm $ARCHIVE
+              volumeMounts:
+                - name: rclone-config
+                  mountPath: /etc/rclone
+                - name: vlogs-backup
+                  mountPath: /backup
