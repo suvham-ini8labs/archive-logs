@@ -73,7 +73,7 @@ spec:
                 - -c
                 - |
                   set -e
-                  YESTERDAY=$(date -d "@$(($(date +%s) - 86400))" +%Y%m%d)
+                  YESTERDAY=$(date -d "@$(($(date +%s) - 86400))" +%Y-%m-%d)
                   ARCHIVE="/backup/vlogs_${YESTERDAY}.tar.gz"
 
                   echo "==> Uploading $ARCHIVE to S3"
