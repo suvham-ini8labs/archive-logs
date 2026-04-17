@@ -43,7 +43,7 @@ kubectl create job --from=cronjob/vlogs-daily-backup vlogs-backup-test -n loggin
 ## Restore Process
 
 We can download the snapshot archive from s3 and attach the parition for querying.
-http://<server-url>:9428/internal/partition/attach?name=YYYYMMDD - attaches the partition directory with the given name YYYYMMDD to VictoriaLogs, so it becomes visible for querying and can be used for data ingestion. The directory must be placed inside <-storageDataPath>/partitions and it must contain valid data for the given YYYYMMDD day.
+http://server-url:9428/internal/partition/attach?name=YYYYMMDD - attaches the partition directory with the given name YYYYMMDD to VictoriaLogs, so it becomes visible for querying and can be used for data ingestion. The directory must be placed inside <-storageDataPath>/partitions and it must contain valid data for the given YYYYMMDD day.
 
 ## Terminology
 
